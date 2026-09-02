@@ -1,18 +1,27 @@
 import urllib.parse
 from bs4 import BeautifulSoup
+from typing import TypedDict
+class PageData(TypedDict):
+    url: str
+    heading: str
+    first_paragraph: str
+    outgoing_links: list[str]
+    image_urls: list[str]
+    
 
-def normalize_url(input_url: str) -> str | None: # normalize the url to a standard format, if the url is invalid return None
+def normalize_url(input_url: str) -> str: # normalize the url to a standard format, if the url is invalid return None
     try:
         splitted = urllib.parse.urlsplit(input_url)
         if not splitted.netloc:
-            return None
+            return ''
         
         final_path = f"{splitted.netloc}{splitted.path.rstrip("/")}"
         return final_path.lower()
     
     except Exception as e:
         print(f"Unexpected error: {type(e).__name__} - {e}")
-        
+        return ''
+    
 def get_heading_from_html(html: str) -> str: # get the first heading from the html, if no heading return empty string
     
     try:
@@ -48,3 +57,57 @@ def get_first_paragraph_from_html(html: str) -> str: # get the first paragraph f
         return soup.find('p').get_text(strip=True)
     else:
         return ''
+    
+def get_urls_from_html(html: str, base_url: str) -> list[str]:
+    
+    try:
+        soup = BeautifulSoup(html,'html.parser')
+    except Exception as e:
+        print(f"Unexpected error: {type(e).__name__} - {e}")
+        return []
+    
+    url_list = []
+    all_tags = soup.find_all('a') # list with all the <a> tags in the form of tag objects so that we can access their attributes and text content
+    
+    try: 
+        for tag in all_tags:
+            url_from_tag = tag.get('href')
+            absolute_url = urllib.parse.urljoin(base_url,url_from_tag)
+            url_list.append(absolute_url)
+        
+    except Exception as e:
+        print(f"{str(e)}: {url_from_tag} is not a valid URL")
+
+    return url_list
+
+def get_images_from_html(html: str, base_url: str) -> list[str]:
+    
+    try:
+        soup = BeautifulSoup(html,'html.parser')
+    except Exception as e:
+        print(f"Unexpected error: {type(e).__name__} - {e}")
+        return []
+    
+    images_url_list = []
+    all_tags = soup.find_all('img') # list with all the <img> tags in the form of tag objects so that we can access their attributes and text content
+    
+    try:
+        for tag in all_tags:
+            image_url = tag.get('src')
+            absolute_url = urllib.parse.urljoin(base_url,image_url)
+            images_url_list.append(absolute_url)       
+    except Exception as e:
+        print(f"{str(e)}: {image_url} is not a valid image URL")
+        
+    return images_url_list
+
+def extract_page_data(html: str, page_url: str) -> PageData:
+    data: PageData = {'url': page_url,
+                    'heading': get_heading_from_html(html),
+                    'first_paragraph': get_first_paragraph_from_html(html),
+                    'outgoing_links': get_urls_from_html(html, page_url),
+                    'image_urls': get_images_from_html(html, page_url)
+                    }
+    
+    return data
+    
