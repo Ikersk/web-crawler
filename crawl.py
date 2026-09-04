@@ -125,6 +125,13 @@ def get_html(url):
         raise Exception(f"Content-Type is not text/html for URL: {url}")
     
     return response.text # return the HTML content of the page
+
+def safe_get_html(url: str) -> str | None:
+    try:
+        return get_html(url)
+    except Exception as e:
+        print(f"{e}")
+        return None
     
 def crawl_page(base_url: str, current_url:str | None =None, page_data: dict | None =None):
     
@@ -146,7 +153,7 @@ def crawl_page(base_url: str, current_url:str | None =None, page_data: dict | No
         return page_data
     
     print(f"Crawling {normalized_current_url}")
-    current_html = get_html(current_url)
+    current_html = safe_get_html(current_url)
     
     if isinstance(current_html,str):
         page_data[normalized_current_url] = extract_page_data(current_html,normalized_current_url)
