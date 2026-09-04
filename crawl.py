@@ -1,6 +1,7 @@
 import urllib.parse
 from bs4 import BeautifulSoup
 from typing import TypedDict
+import requests
 class PageData(TypedDict):
     url: str
     heading: str
@@ -110,4 +111,53 @@ def extract_page_data(html: str, page_url: str) -> PageData:
                     }
     
     return data
+
+def get_html(url):
+    try:
+        response = requests.get(url, headers={"User-Agent": "BootCrawler/1.0"})
+    except Exception as e:
+        raise Exception(f"network error while fetching {url}: {e}")
+    
+    if response.status_code > 399: 
+        raise Exception(f"HTTP error {response.status_code} for URL: {url}")
+    
+    if "text/html" not in response.headers.get("Content-Type", ""): # check if the content type is a valid HTML page
+        raise Exception(f"Content-Type is not text/html for URL: {url}")
+    
+    return response.text # return the HTML content of the page
+    
+def crawl_page(base_url: str, current_url:str | None =None, page_data: dict | None =None):
+    
+    if page_data == None:
+        page_data = {}
+        
+    if current_url == None:
+        current_url = base_url
+            
+    base_splitted = urllib.parse.urlsplit(base_url)
+    current_splitted = urllib.parse.urlsplit(current_url)
+    normalized_current_url = normalize_url(current_url)
+    
+        
+    if base_splitted.hostname != current_splitted.hostname:
+        return page_data
+    
+    if normalized_current_url in page_data:
+        return page_data
+    
+    print(f"Crawling {normalized_current_url}")
+    current_html = get_html(current_url)
+    
+    if isinstance(current_html,str):
+        page_data[normalized_current_url] = extract_page_data(current_html,normalized_current_url)
+        next_url_list = get_urls_from_html(current_html,base_url)
+        
+        for url in next_url_list:
+            crawl_page(base_url,url,page_data)
+        
+        return page_data
+    else:
+        return page_data
+    
+    
     

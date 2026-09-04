@@ -1,19 +1,6 @@
 import sys
-import requests
+from crawl import *
 
-def get_html(url):
-    try:
-        response = requests.get(url, headers={"User-Agent": "BootCrawler/1.0"})
-    except Exception as e:
-        raise Exception(f"network error while fetching {url}: {e}")
-    
-    if response.status_code > 399: 
-        raise Exception(f"HTTP error {response.status_code} for URL: {url}")
-    
-    if "text/html" not in response.headers.get("Content-Type", ""): # check if the content type is a valid HTML page
-        raise Exception(f"Content-Type is not text/html for URL: {url}")
-    
-    return response.text # return the HTML content of the page
     
 def main():
     if len(sys.argv) != 2:
@@ -23,9 +10,16 @@ def main():
         print(f"starting crawl of: {sys.argv[1]}")
     
     try:
-        html_content = get_html(sys.argv[1])
-        print(f"HTML content fetched successfully for URL: {sys.argv[1]}")
-        print(html_content)
+        
+        crawl_content = crawl_page(base_url=sys.argv[1])
+        
+        if isinstance(crawl_content,dict):
+            print(f'Number of pages: {len(crawl_content)}')
+            for item in crawl_content.values():
+                print(f"- {item['url']}: {len(item['outgoing_links'])} outgoing links")
+                print(f"- Heading: {item['heading']}")
+                print(f"- First Paragraph: {item['first_paragraph']}")
+                print("")
         
     except Exception as e:
         print(f"Error fetching HTML content: {e}")
