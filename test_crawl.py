@@ -21,7 +21,7 @@ class TestCrawl(unittest.TestCase):
             self.assertEqual(actual, expected)
     
     def test_normalize_url_invalidinput(self) -> None:
-            self.assertIsNone(normalize_url("Hello World"))
+            self.assertEqual(normalize_url("Hello World"), "")
     
     def test_normalize_url_uppercase(self) -> None:
             input_url = "http://www.BOOT.dev/BLOG/path/"
