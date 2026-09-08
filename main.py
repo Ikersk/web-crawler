@@ -1,8 +1,7 @@
 import sys
 from crawl import *
 
-    
-def main():
+async def main():
     if len(sys.argv) != 2:
         print("Usage: python main.py <url>")
         sys.exit(1)
@@ -11,9 +10,10 @@ def main():
     
     try:
         
-        crawl_content = crawl_page(base_url=sys.argv[1])
+        crawl_content = await crawl_site_async(base_url=sys.argv[1])
         
-        if isinstance(crawl_content,dict):
+        # if the crawl_content is a dictionary of pages with their details
+        if isinstance(crawl_content,dict): 
             print(f'Number of pages: {len(crawl_content)}')
             for item in crawl_content.values():
                 print(f"- {item['url']}: {len(item['outgoing_links'])} outgoing links")
@@ -26,4 +26,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
