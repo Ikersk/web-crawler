@@ -2,15 +2,15 @@ import sys
 from crawl import *
 
 async def main():
-    if len(sys.argv) != 2:
-        print("Usage: python main.py <url>")
+    if len(sys.argv) != 4:
+        print("Usage: python main.py <url> <max_concurrency> <max_pages>")
         sys.exit(1)
     else:
         print(f"starting crawl of: {sys.argv[1]}")
     
     try:
         
-        crawl_content = await crawl_site_async(base_url=sys.argv[1])
+        crawl_content = await crawl_site_async(base_url=sys.argv[1], max_concurrency=int(sys.argv[2]), max_pages=int(sys.argv[3]))
         
         # if the crawl_content is a dictionary of pages with their details
         if isinstance(crawl_content,dict): 

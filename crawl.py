@@ -13,14 +13,17 @@ class PageData(TypedDict):
     image_urls: list[str]
 
 class AsyncCrawler:
-    def __init__(self,base_url) -> None:
+    def __init__(self,base_url: str, max_concurrency: int, max_pages: int) -> None:
         self.base_url = base_url
         self.base_domain = urllib.parse.urlsplit(base_url).netloc
         self.page_data: dict[str, PageData] = {}
         self.lock = asyncio.Lock()
-        self.max_concurrency = 10
+        self.max_concurrency = max_concurrency
         self.semaphore = asyncio.Semaphore(self.max_concurrency)
         self.session: aiohttp.ClientSession | None = None
+        self.max_pages = max_pages  
+        self.should_stop: bool = False
+        self.all_tasks: set[asyncio.Task] = set()
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -30,12 +33,27 @@ class AsyncCrawler:
         if self.session is not None:
             await self.session.close() 
     
+    # This method checks if a page can be added to the crawl data. It ensures that the crawler does not exceed the maximum page limit and that the page has not already been visited. If the maximum page limit is reached, it sets a flag to stop further crawling and cancels any ongoing tasks.
     async def add_page_visit(self, normalized_url):
         async with self.lock:
+            
+            if self.should_stop:
+                return False
+            
+            if len(self.page_data) >= self.max_pages:
+                self.should_stop = True
+                print(f"Reached maximum page limit of {self.max_pages}. Stopping further crawling.")
+                for task in self.all_tasks:
+                    if not task.done():
+                        task.cancel()  
+                return False
+        
             if normalized_url in self.page_data:
                 return False
+            
             return True
     
+    # This method fetches the HTML content of a given URL using an asynchronous HTTP GET request. It checks for HTTP errors and ensures that the content type is "text/html". If successful, it returns the HTML content as a string; otherwise, it handles exceptions and returns None.
     async def get_html(self,url):
         if self.session is None:
             return None
@@ -54,8 +72,11 @@ class AsyncCrawler:
             print(f"Error fetching {url}: {e}")
             return None
     
-        
+    # This method is the core of the asynchronous crawling process. It takes a URL, checks if it should be crawled based on domain and visit history, fetches its HTML content, extracts relevant data, and identifies outgoing links. It then recursively creates tasks to crawl each of those outgoing links, while respecting concurrency limits and handling task management.    
     async def crawl_page(self,current_url:str):
+        if self.should_stop: # check if the crawling process should be stopped due to reaching the maximum page limit
+            print("Crawling stopped.")
+            return self.page_data
          
         current_splitted = urllib.parse.urlsplit(current_url)
         normalized_current_url = normalize_url(current_url)
@@ -76,24 +97,34 @@ class AsyncCrawler:
                 next_url_list = get_urls_from_html(current_html,self.base_url)
             else:
                 return self.page_data  
-              
-        tasks = []
-        for url in next_url_list:
-            tasks.append(asyncio.create_task(self.crawl_page(url)))
-        if tasks:
-            await asyncio.gather(*tasks)
+        
+        tasks: list[asyncio.Task[None]] = [] # list to hold the tasks for crawling the outgoing links
+        
+        for next_url in next_url_list: # iterate through the list of outgoing links and create a new task for each link to crawl it asynchronously
+            task = asyncio.create_task(self.crawl_page(next_url))
+            tasks.append(task)
+            self.all_tasks.add(task) # add the task to the set of all tasks to keep track of them for potential cancellation if the maximum page limit is reached
 
+        if tasks: # if there are tasks to crawl the outgoing links, gather them and wait for their completion. The `return_exceptions=True` argument allows the gathering to continue even if some tasks raise exceptions, ensuring that the crawling process is robust and can handle errors gracefully.
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True) # gather the tasks and wait for their completion
+            finally:
+                for task in tasks:
+                    self.all_tasks.discard(task) # remove the completed tasks from the set of all tasks to keep the tracking accurate and prevent memory leaks. This ensures that only active tasks are kept in the set, allowing for proper management of the crawling process.
+                            
+    # This method initiates the crawling process starting from the base URL. It calls the `crawl_page` method and returns the collected page data once the crawling is complete.
     async def crawl(self):
         await self.crawl_page(self.base_url)
         return self.page_data
     
-async def crawl_site_async(base_url: str) -> dict:
-    async with AsyncCrawler(base_url) as crawler:
+   
+# This function serves as a wrapper to initiate the asynchronous crawling process. It creates an instance of the `AsyncCrawler` class with the specified base URL, maximum concurrency, and maximum pages. It then uses an asynchronous context manager to ensure proper resource management and calls the `crawl` method to start the crawling process. Finally, it returns the collected page data as a dictionary.    
+async def crawl_site_async(base_url: str, max_concurrency: int, max_pages: int) -> dict:
+    async with AsyncCrawler(base_url, max_concurrency, max_pages) as crawler:
         return await crawler.crawl()
  
-        
-
-def normalize_url(input_url: str) -> str: # normalize the url to a standard format, if the url is invalid return None
+# This function normalizes a given URL by splitting it into its components, ensuring that it has a valid network location (netloc), and returning a lowercase string representation of the netloc combined with the path, with any trailing slashes removed. If the URL is invalid or an error occurs during processing, it returns an empty string.
+def normalize_url(input_url: str) -> str: 
     try:
         splitted = urllib.parse.urlsplit(input_url)
         if not splitted.netloc:
@@ -105,8 +136,9 @@ def normalize_url(input_url: str) -> str: # normalize the url to a standard form
     except Exception as e:
         print(f"Unexpected error: {type(e).__name__} - {e}")
         return ''
-    
-def get_heading_from_html(html: str) -> str: # get the first heading from the html, if no heading return empty string
+
+# get the first heading from the html, if no heading return empty string
+def get_heading_from_html(html: str) -> str:
     
     try:
         soup = BeautifulSoup(html,'html.parser')
@@ -121,8 +153,8 @@ def get_heading_from_html(html: str) -> str: # get the first heading from the ht
         return soup.find('h2').get_text(strip=True)
     else:
         return ''
-    
-def get_first_paragraph_from_html(html: str) -> str: # get the first paragraph from the html, if no paragraph return empty string
+# get the first paragraph from the html, if no paragraph return empty string    
+def get_first_paragraph_from_html(html: str) -> str:
     
     try:
         soup = BeautifulSoup(html,'html.parser')
@@ -142,6 +174,7 @@ def get_first_paragraph_from_html(html: str) -> str: # get the first paragraph f
     else:
         return ''
     
+# This function extracts all URLs from the provided HTML content. It uses BeautifulSoup to parse the HTML and find all anchor (<a>) tags. For each anchor tag, it retrieves the href attribute, constructs an absolute URL using the base URL, and appends it to a list. If any errors occur during parsing or URL construction, they are handled gracefully, and an empty list is returned in case of failure.
 def get_urls_from_html(html: str, base_url: str) -> list[str]:
     
     try:
@@ -164,6 +197,7 @@ def get_urls_from_html(html: str, base_url: str) -> list[str]:
 
     return url_list
 
+# This function extracts all image URLs from the provided HTML content. It uses BeautifulSoup to parse the HTML and find all image (<img>) tags. For each image tag, it retrieves the src attribute, constructs an absolute URL using the base URL, and appends it to a list. If any errors occur during parsing or URL construction, they are handled gracefully, and an empty list is returned in case of failure.
 def get_images_from_html(html: str, base_url: str) -> list[str]:
     
     try:
@@ -185,6 +219,7 @@ def get_images_from_html(html: str, base_url: str) -> list[str]:
         
     return images_url_list
 
+# This function extracts the main data from a given HTML page and returns it as a `PageData` dictionary. It retrieves the page's URL, heading, first paragraph, outgoing links, and image URLs using the previously defined helper functions.
 def extract_page_data(html: str, page_url: str) -> PageData:
     data: PageData = {'url': page_url,
                     'heading': get_heading_from_html(html),
@@ -193,49 +228,4 @@ def extract_page_data(html: str, page_url: str) -> PageData:
                     'image_urls': get_images_from_html(html, page_url)
                     }
     
-    return data
-
-def safe_get_html(url: str) -> str | None:
-    try:
-        return get_html(url)
-    except Exception as e:
-        print(f"{e}")
-        return None
-    
-def crawl_page(base_url: str, current_url:str | None =None, page_data: dict | None =None):
-    
-    if page_data == None:
-        page_data = {}
-        
-    if current_url == None:
-        current_url = base_url
-            
-    base_splitted = urllib.parse.urlsplit(base_url)
-    current_splitted = urllib.parse.urlsplit(current_url)
-    normalized_current_url = normalize_url(current_url)
-    
-        
-    if base_splitted.hostname != current_splitted.hostname:
-        return page_data
-    
-    if normalized_current_url in page_data:
-        return page_data
-    
-    print(f"Crawling {normalized_current_url}")
-    current_html = safe_get_html(current_url)
-    
-    # If the HTML content is successfully fetched (i.e., it's a string), extract the page data and store it in the `page_data` dictionary. 
-    # Then, retrieve the list of outgoing URLs from the current page and recursively crawl each of those URLs. 
-    # Finally, return the updated `page_data` dictionary. If the HTML content could not be fetched (i.e., it's not a string), simply return the current `page_data` without making any changes.
-    if isinstance(current_html,str):
-        page_data[normalized_current_url] = extract_page_data(current_html,normalized_current_url)
-        next_url_list = get_urls_from_html(current_html,base_url)
-        
-        for url in next_url_list:
-            crawl_page(base_url,url,page_data)
-        return page_data
-    else:
-        return page_data
-    
-    
-    
+    return data  
